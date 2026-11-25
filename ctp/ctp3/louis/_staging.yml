@@ -1,0 +1,196 @@
+version: 2
+
+# CTP 3 - Exercise 1: document and govern the staging models.
+# For each model: description, meta (owner, steward, domain, tier); for each column: description,
+# and for personal data: tags: ['pii'] + meta: {classification: confidential|restricted}.
+# Classification scale used at ShopFast:
+#   internal     = pseudonymous identifier, useless without another table
+#   confidential = directly identifies a person (name, email, phone, city, consent)
+#   restricted   = sensitive or regulated (birth date, payment card data) - need-to-know access only
+
+models:
+  - name: stg_customers
+    description: "One row per customer account, cleaned from raw.customers (exact duplicate rows removed, ISO country codes, ISO dates)."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: customer
+      tier: gold
+    columns:
+      - name: customer_id
+        description: "Technical identifier of the customer account. One person may have several accounts (see duplicates)."
+        tags: ['pii']
+        meta: {classification: internal}
+        data_tests: [unique, not_null]
+      - name: first_name
+        description: "First name given at signup, trimmed and written with a capital first letter ('MARIE ' -> 'Marie')."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: last_name
+        description: "Last name given at signup, trimmed and written with a capital first letter."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: email
+        description: "Login email, trimmed and lower-cased."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: phone
+        description: "Phone number as typed by the customer (format not standardised, may be empty)."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: birth_date
+        description: "Date of birth (DATE, YYYY-MM-DD). French DD/MM/YYYY, US MM-DD-YYYY and YYYY/MM/DD inputs are converted. Some impossible values remain (1899, future years) - see the CTP 2 scorecard."
+        tags: ['pii']
+        meta: {classification: restricted}
+      - name: city
+        description: "City of the customer's address."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: country_code
+        description: "Country of the customer as ISO 3166-1 alpha-2 code (FR, BE, DE, ES). 17 raw spellings are mapped; empty when the raw value was empty."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['FR', 'BE', 'DE', 'ES']
+      - name: signup_date
+        description: "Date the account was created (DATE, YYYY-MM-DD), converted from 4 mixed raw formats."
+      - name: has_marketing_consent
+        description: "True when the customer accepted marketing emails (GDPR consent). Marketing campaigns may only target rows where this is true."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: loyalty_tier
+        description: "Loyalty programme level, lower case: bronze < silver < gold < platinum ('Platinium' typo fixed)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['bronze', 'silver', 'gold', 'platinum']
+
+  - name: stg_orders
+    description: "One row per customer order, cleaned from raw.orders (duplicate order_ids removed, status lower-cased)."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: sales
+      tier: gold
+    columns:
+      - name: order_id
+        description: "Identifier of the order, given by the order system. One row per order_id (first copy kept when duplicated)."
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: "Account that placed the order (-> stg_customers.customer_id). 14 orders point to an unknown customer."
+        tags: ['pii']
+        meta: {classification: internal}
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+              config:
+                severity: warn
+      - name: order_date
+        description: "Date the order was placed (DATE, YYYY-MM-DD). Empty when the raw value could not be read (11 rows); a few dates are in the future (bug in the order system)."
+      - name: status
+        description: "Lifecycle status of the order: pending -> shipped -> delivered, or cancelled / returned. 'canceled' (US spelling) is mapped to 'cancelled'."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['pending', 'shipped', 'delivered', 'cancelled', 'returned']
+      - name: channel
+        description: "Sales channel where the order was placed: web, mobile_app or marketplace."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['web', 'mobile_app', 'marketplace']
+      - name: shipping_country
+        description: "Delivery country, ISO 3166-1 alpha-2 code (FR, BE, DE, ES)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['FR', 'BE', 'DE', 'ES']
+      - name: total_amount_eur
+        description: "Amount paid by the customer for the order, in EUROS with 2 decimals, VAT included, shipping included, before refunds (= gross revenue). Not cents."
+
+  - name: stg_order_items
+    description: "One row per product line of an order."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: sales
+      tier: silver
+    columns:
+      - name: order_item_id
+        description: "Identifier of the order line."
+        data_tests: [unique, not_null]
+      - name: order_id
+        description: "Order the line belongs to (-> stg_orders.order_id)."
+      - name: product_id
+        description: "Product sold on this line (-> stg_products.product_id)."
+      - name: quantity
+        description: "Number of units of the product on this line."
+      - name: unit_price_eur
+        description: "Price of one unit at the time of the order, in EUROS with 2 decimals, VAT included."
+
+  - name: stg_payments
+    description: "One row per payment event from the payment provider (captured or refunded). Amounts are in EUROS with 2 decimals, never in cents."
+    meta:
+      owner: "Paul Girard (Head of Finance)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: finance
+      tier: gold
+    columns:
+      - name: payment_id
+        description: "Identifier of the payment event given by the payment provider."
+        data_tests: [unique, not_null]
+      - name: order_id
+        description: "Order paid or refunded (-> stg_orders.order_id). An order can have one capture and one refund."
+        data_tests: [not_null]
+      - name: payment_date
+        description: "Date the payment provider captured or refunded the money (DATE, YYYY-MM-DD)."
+      - name: method
+        description: "Payment method chosen by the customer: card, paypal, bank_transfer or apple_pay."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['card', 'paypal', 'bank_transfer', 'apple_pay']
+      - name: amount
+        description: "Amount of the payment event in EUROS with 2 decimals (e.g. 54.50 = fifty-four euros fifty), VAT included. NOT CENTS: a batch in cents (5450) must be rejected at ingestion - this is the CM 2 incident. Expected range 0 < amount <= 2000."
+      - name: currency
+        description: "ISO 4217 currency code of amount. Always EUR today."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['EUR']
+      - name: card_last4
+        description: "Last 4 digits of the payment card, used by Customer Service to identify a payment. Payment card data (PCI DSS): never join it with name or email in a report."
+        tags: ['pii']
+        meta: {classification: restricted}
+      - name: payment_status
+        description: "captured = money received from the customer; refunded = money sent back to the customer (amount is positive in both cases)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['captured', 'refunded']
+
+  - name: stg_products
+    description: "Product catalogue with list prices."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: product
+      tier: silver
+    columns:
+      - name: product_id
+        description: "Identifier of the product."
+        data_tests: [unique, not_null]
+      - name: sku
+        description: "Stock keeping unit, the product reference used by the warehouse."
+      - name: product_name
+        description: "Name of the product shown on the website."
+      - name: category
+        description: "Product category, written with a capital first letter."
+      - name: list_price_eur
+        description: "Current catalogue price of one unit, in EUROS with 2 decimals, VAT included (may differ from the price paid on an order)."
+      - name: supplier
+        description: "Company that supplies the product."
+      - name: is_active
+        description: "True when the product can still be sold."

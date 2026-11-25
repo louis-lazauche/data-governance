@@ -1,0 +1,78 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: "One row per order with gross, refunded and net revenue. Source of the Sales dashboard and the Finance report."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: sales
+      tier: gold
+    columns:
+      - name: order_id
+        description: "{{ doc('order') }}"
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: "Account that placed the order (-> dim_customers.customer_id)."
+        tags: ['pii']
+        meta: {classification: internal}
+      - name: order_date
+        description: "Date the order was placed (DATE, YYYY-MM-DD)."
+      - name: status
+        description: "Lifecycle status: pending, shipped, delivered, cancelled or returned. Cancelled orders are excluded from net revenue reporting and from active customers."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['pending', 'shipped', 'delivered', 'cancelled', 'returned']
+      - name: channel
+        description: "Sales channel: web, mobile_app or marketplace."
+      - name: shipping_country
+        description: "Delivery country, ISO 3166-1 alpha-2 code (FR, BE, DE, ES)."
+      - name: gross_revenue_eur
+        description: "{{ doc('gross_revenue') }}"
+      - name: refunded_eur
+        description: "Sum of the refunded payment events of the order, in EUROS with 2 decimals, VAT included. 0 when nothing was refunded."
+      - name: net_revenue_eur
+        description: "{{ doc('net_revenue') }}"
+
+  - name: dim_customers
+    description: "One row per customer account with lifetime metrics (number of orders, last order date, lifetime net revenue). Used to count active and churned customers and by the churn model."
+    meta:
+      owner: "Sara Martin (Head of Sales)"
+      steward: "Karim Benali (Analytics Engineer)"
+      domain: customer
+      tier: gold
+    columns:
+      - name: customer_id
+        description: "{{ doc('customer') }}"
+        tags: ['pii']
+        meta: {classification: internal}
+        data_tests: [unique, not_null]
+      - name: first_name
+        description: "First name of the customer."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: last_name
+        description: "Last name of the customer."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: email
+        description: "Login email, trimmed and lower-cased."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: country_code
+        description: "Country of the customer, ISO 3166-1 alpha-2 code (FR, BE, DE, ES); empty when unknown."
+      - name: loyalty_tier
+        description: "Loyalty programme level: bronze, silver, gold or platinum."
+      - name: signup_date
+        description: "Date the account was created (DATE, YYYY-MM-DD)."
+      - name: has_marketing_consent
+        description: "True when the customer accepted marketing emails (GDPR consent). Campaigns may only target true."
+        tags: ['pii']
+        meta: {classification: confidential}
+      - name: lifetime_orders
+        description: "Number of orders ever placed by the account, all statuses included (cancelled too)."
+      - name: last_order_date
+        description: "{{ doc('active_customer') }}"
+      - name: lifetime_net_revenue_eur
+        description: "Sum of net_revenue_eur of all the orders of the account, in EUROS excluding VAT. 0 when the account never ordered."

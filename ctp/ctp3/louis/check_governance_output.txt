@@ -1,0 +1,3 @@
+$ python check_governance.py
+Models: 7 | documented columns: 58/58
+GOVERNANCE CHECK: PASSED
